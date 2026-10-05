@@ -12,11 +12,14 @@ from test_animador import FakeComp, FakeTool  # noqa: E402
 class FakeTimelineComp(FakeComp):
     def __init__(self, inicio, fim):
         super().__init__()
-        self.media_in = FakeTool("MediaIn1")
+        self.media_in = FakeTool("MediaIn1", self)
+        self.tools.append(self.media_in)
         self.attrs = {"COMPN_RenderStart": inicio, "COMPN_RenderEnd": fim}
 
-    def GetToolList(self, selecionados, tipo):
-        return {1: self.media_in} if tipo == "MediaIn" else {}
+    def GetToolList(self, selecionados=False, tipo=None):
+        if tipo == "MediaIn":
+            return {1: self.media_in}
+        return super().GetToolList(selecionados, tipo)
 
     def GetAttrs(self):
         return self.attrs
@@ -60,7 +63,7 @@ class TestAnimadorApp(unittest.TestCase):
         item = FakeItem(comps=0)
         app.aplicar_em_clipe(item, "Zoom Pop", 20, app.POSICOES[0])
         comp = item.comps[0]
-        transform = comp.tools[0]
+        transform = comp.tools[1]
         self.assertIs(transform.Input.source, comp.media_in.Output)
         self.assertEqual(min(transform.values["Size"]), 0)
 
@@ -72,14 +75,14 @@ class TestAnimadorApp(unittest.TestCase):
     def test_fim_do_clipe_termina_no_ultimo_frame(self):
         item = FakeItem(comps=1, duracao=100)
         app.aplicar_em_clipe(item, "Fade Out", 24, app.POSICOES[1])
-        gain = item.comps[0].tools[0].values["Gain"]
+        gain = item.comps[0].tools[1].values["Gain"]
         self.assertEqual(min(gain), 75)
         self.assertEqual(max(gain), 99)
 
     def test_duracao_maior_que_clipe_e_limitada(self):
         item = FakeItem(comps=1, duracao=10)
         app.aplicar_em_clipe(item, "Fade In", 500, app.POSICOES[0])
-        self.assertEqual(max(item.comps[0].tools[0].values["Gain"]), 9)
+        self.assertEqual(max(item.comps[0].tools[1].values["Gain"]), 9)
 
     def test_listar_clipes_de_todas_as_trilhas(self):
         a, b, c = FakeItem(), FakeItem(), FakeItem()

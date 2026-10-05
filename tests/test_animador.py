@@ -21,6 +21,9 @@ class FakeInput:
         self.owner = owner
         self.source = None
 
+    def GetConnectedOutput(self):
+        return self.source
+
     def ConnectTo(self, output):
         if self.source:
             self.source.connected.remove(self)
@@ -29,8 +32,10 @@ class FakeInput:
 
 
 class FakeTool:
-    def __init__(self, kind):
+    def __init__(self, kind, comp=None):
         self.Name = kind
+        self.kind = kind
+        self.comp = comp
         self.Output = FakeOutput(self)
         self.Input = FakeInput(self)
         self.modifiers = {}
@@ -45,6 +50,14 @@ class FakeTool:
     def SetInput(self, name, value, frame=None):
         self.values.setdefault(name, {})[frame] = value
 
+    def SetAttrs(self, attrs):
+        self.Name = attrs.get("TOOLS_Name", self.Name)
+
+    def Delete(self):
+        if self.Input.source:
+            self.Input.source.connected.remove(self.Input)
+        self.comp.tools.remove(self)
+
 
 class FakeComp:
     def __init__(self):
@@ -52,9 +65,13 @@ class FakeComp:
         self.undo = []
 
     def AddTool(self, kind, x, y):
-        tool = FakeTool(kind)
+        tool = FakeTool(kind, self)
         self.tools.append(tool)
         return tool
+
+    def GetToolList(self, selecionados=False, tipo=None):
+        tools = [t for t in self.tools if tipo is None or t.kind == tipo]
+        return {i + 1: t for i, t in enumerate(tools)}
 
     def StartUndo(self, name):
         self.undo.append(name)
@@ -71,8 +88,7 @@ class FakeComp:
 
 class TestEasings(unittest.TestCase):
     def test_easings_comecam_em_0_e_terminam_em_1(self):
-        for f in (an.linear, an.ease_in_out_sine, an.ease_out_cubic,
-                  an.ease_out_back, an.ease_out_bounce):
+        for f in list(an.EASINGS.values()) + [an.ease_in_back]:
             self.assertAlmostEqual(f(0), 0, places=6, msg=f.__name__)
             self.assertAlmostEqual(f(1), 1, places=6, msg=f.__name__)
 
@@ -114,7 +130,7 @@ class TestAplicar(unittest.TestCase):
         an.aplicar_preset(comp, texto, "Girar e aparecer", 0, 10)
 
         transform = comp.tools[0]
-        self.assertEqual(transform.Name, "Transform")
+        self.assertEqual(transform.Name, "AnimadorTransform1")
         self.assertIs(transform.Input.source, texto.Output)
         self.assertIs(merge.Input.source, transform.Output)
         self.assertEqual(transform.modifiers, {"Angle": "BezierSpline", "Size": "BezierSpline"})
@@ -131,11 +147,84 @@ class TestAplicar(unittest.TestCase):
     def test_fade_usa_brightness_contrast(self):
         comp = FakeComp()
         an.aplicar_preset(comp, FakeTool("Text1"), "Fade In", 5, 10)
-        self.assertEqual([t.Name for t in comp.tools], ["BrightnessContrast"])
+        self.assertEqual([t.kind for t in comp.tools], ["BrightnessContrast"])
         fade = comp.tools[0]
         self.assertEqual(fade.values["ProcessAlpha"][None], 1)
         self.assertEqual(fade.values["Gain"][5], 0.0)
         self.assertAlmostEqual(fade.values["Gain"][15], 1.0)
+
+
+class TestOpcoes(unittest.TestCase):
+    def test_curva_substitui_a_do_preset(self):
+        padrao = an.gerar_keyframes("Zoom Pop", 0, 10)["Size"]
+        linear = an.gerar_keyframes("Zoom Pop", 0, 10, easing="Linear")["Size"]
+        self.assertAlmostEqual(linear[5][1], 0.5)
+        self.assertNotAlmostEqual(padrao[5][1], 0.5)
+
+    def test_oscilacao_ignora_curva(self):
+        self.assertEqual(an.gerar_keyframes("Balançar", 0, 20),
+                         an.gerar_keyframes("Balançar", 0, 20, easing="Linear"))
+
+    def test_curva_invalida(self):
+        with self.assertRaises(ValueError):
+            an.gerar_keyframes("Fade In", 0, 10, easing="Nao existe")
+
+    def test_intensidade_escala_a_distancia_do_repouso(self):
+        dobro = an.gerar_keyframes("Ken Burns", 0, 10, intensidade=2)["Size"]
+        self.assertAlmostEqual(dobro[-1][1], 1.4)
+        metade = an.gerar_keyframes("Deslizar da esquerda", 0, 10, intensidade=0.5)
+        self.assertAlmostEqual(metade["Center"][0][1][0], 0.0)
+
+    def test_valores_limitados(self):
+        keys = an.gerar_keyframes("Fade In", 0, 10, intensidade=2)["Gain"]
+        self.assertTrue(all(0 <= v <= 1 for _, v in keys))
+        tamanhos = an.gerar_keyframes("Zoom Pop", 0, 10, intensidade=2)["Size"]
+        self.assertTrue(all(v >= 0 for _, v in tamanhos))
+
+    def test_todo_preset_tem_categoria(self):
+        self.assertEqual(set(an.PRESETS), set(an.CATEGORIAS))
+        self.assertGreaterEqual(len(an.PRESETS), 25)
+
+
+class TestNos(unittest.TestCase):
+    def test_desfoque_cria_transform_blur_e_fade_em_ordem(self):
+        comp = FakeComp()
+        imagem = FakeTool("MediaIn1", comp)
+        comp.tools.append(imagem)
+        saida = FakeTool("MediaOut1", comp)
+        comp.tools.append(saida)
+        saida.Input.ConnectTo(imagem.Output)
+
+        an.aplicar_preset(comp, imagem, "Desfoque de entrada", 0, 10)
+
+        blur, fade = comp.tools[2], comp.tools[3]
+        self.assertEqual((blur.kind, fade.kind), ("Blur", "BrightnessContrast"))
+        self.assertIs(blur.Input.source, imagem.Output)
+        self.assertIs(fade.Input.source, blur.Output)
+        self.assertIs(saida.Input.source, fade.Output)
+
+    def test_nomes_nao_se_repetem(self):
+        comp = FakeComp()
+        imagem = FakeTool("MediaIn1", comp)
+        comp.tools.append(imagem)
+        an.aplicar_preset(comp, imagem, "Zoom Pop", 0, 10)
+        an.aplicar_preset(comp, imagem, "Pulsar", 0, 10)
+        nomes = [t.Name for t in comp.tools if t.kind == "Transform"]
+        self.assertEqual(sorted(nomes), ["AnimadorTransform1", "AnimadorTransform2"])
+
+    def test_remover_religa_a_imagem(self):
+        comp = FakeComp()
+        imagem = FakeTool("MediaIn1", comp)
+        saida = FakeTool("MediaOut1", comp)
+        comp.tools += [imagem, saida]
+        saida.Input.ConnectTo(imagem.Output)
+        an.aplicar_preset(comp, imagem, "Desfoque de entrada", 0, 10)
+        an.aplicar_preset(comp, imagem, "Girar e aparecer", 0, 10)
+
+        self.assertEqual(an.remover_animacoes(comp), 3)
+        self.assertEqual([t.Name for t in comp.tools], ["MediaIn1", "MediaOut1"])
+        self.assertIs(saida.Input.source, imagem.Output)
+        self.assertEqual(an.remover_animacoes(comp), 0)
 
 
 if __name__ == "__main__":
