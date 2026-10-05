@@ -16,7 +16,40 @@ em um clique.
 | Pulsar | Aumenta um pouco e volta (bom para destacar) |
 | Ken Burns | Zoom lento com leve movimento, clássico para fotos |
 
-## Instalação
+Existem duas formas de usar:
+
+- **Animador App** (`AnimadorApp.py`): programa com janela própria que se
+  conecta ao DaVinci e anima vários clipes da timeline de uma vez.
+  Precisa do **DaVinci Resolve Studio**.
+- **Script no DaVinci** (`Animador.py`): janela dentro do DaVinci que anima o
+  nó selecionado na página Fusion. Funciona também na versão gratuita.
+
+## Animador App (programa com janela)
+
+### Preparar (só uma vez)
+
+1. Instale o Python 3 (64 bits) em https://www.python.org/downloads/ e, na
+   instalação, marque **"Add python.exe to PATH"**.
+2. No DaVinci Resolve Studio, abra **Preferences → System → General** e mude
+   **External scripting using** para **Local**. Reinicie o DaVinci.
+3. Baixe a pasta do projeto (no GitHub: **Code → Download ZIP**) e extraia.
+   Os arquivos `AnimadorApp.py` e `Animador.py` precisam ficar na mesma pasta.
+
+### Usar
+
+1. Abra o DaVinci com o projeto e a timeline que tem as imagens.
+2. Dê dois cliques em **`Abrir Animador.bat`**.
+3. Clique em **Conectar / Atualizar**: os clipes da timeline aparecem na lista.
+4. Selecione os clipes (Ctrl/Shift para vários, ou **Selecionar todos**).
+5. Escolha o preset, a duração e se a animação fica no início ou no fim do
+   clipe, e clique em **Aplicar nos clipes selecionados**.
+
+Cada clipe ganha uma composição Fusion com a animação (se já tiver uma, ela é
+usada). Para ver ou ajustar, clique no clipe e abra a página **Fusion**.
+
+## Script no DaVinci
+
+### Instalação
 
 Copie `Animador.py` para a pasta de scripts do Fusion:
 
@@ -27,7 +60,7 @@ Copie `Animador.py` para a pasta de scripts do Fusion:
 Reinicie o DaVinci Resolve. Na versão gratuita, scripts com interface só rodam
 de dentro do programa (pelo menu), que é exatamente como este funciona.
 
-## Como usar
+### Como usar
 
 1. Coloque a imagem na timeline, clique nela e abra a página **Fusion**.
    Selecione o nó da imagem (`MediaIn1`). Também funciona com `Loader`,
