@@ -235,7 +235,8 @@ def gerar_keyframes(preset, frame_inicial, duracao, easing=None, intensidade=1.0
 # dois keyframes (0 no início, 1 no fim) passa pela curva escolhida (Easing,
 # Elastic, Bounce...) e é convertida no valor final com Scale e Offset. As
 # oscilações (Pulsar, Balançar...) usam um BezierSpline com keyframes.
-# O nó é montado como texto de configuração do Fusion e colado na composição.
+# O nó é montado pela API (AddTool/AddModifier). montar_setting gera o mesmo nó
+# como texto .setting, para copiar e colar no Fusion à mão.
 # ---------------------------------------------------------------------------
 
 PREFIXO = "Animador"  # nome dado aos nós criados, para poder removê-los depois
@@ -433,23 +434,64 @@ def _posicionar_depois(comp, origem, novo):
         pass
 
 
-def colar(comp, texto):
-    """Cola um texto de configuração na composição (via Lua, que tem bmd.readstring)."""
-    comp.Execute("comp:Paste(bmd.readstring([==[%s]==]))" % texto)
+def _modificador(alvo, nome, tipo):
+    """Liga um modificador `tipo` ao input `nome` de `alvo` e devolve o modificador."""
+    if not alvo.AddModifier(nome, tipo):
+        raise RuntimeError("O Fusion não aceitou o modificador %s em %s." % (tipo, nome))
+    saida = getattr(alvo, nome).GetConnectedOutput()  # inputs viram atributos no Fusion
+    return saida.GetTool()
+
+
+def _chave(valor):
+    return {1: valor, "Flags": {"Linear": True}}
+
+
+def _animar_numero(alvo, nome, inicio, fim, curva, frame_inicial, duracao, limite):
+    """Anima um input numérico de `alvo` como no AnimCurves exportado do Fusion."""
+    if inicio == fim and curva not in OSCILACOES:
+        alvo.SetInput(nome, inicio)
+        return
+    if curva in OSCILACOES:
+        # Ida e volta: keyframes num BezierSpline.
+        spline = _modificador(alvo, nome, "BezierSpline")
+        spline.SetKeyFrames({
+            frame_inicial + i: _chave(_limitar(limite, interpolar(inicio, fim, curva(i / duracao))))
+            for i in range(duracao + 1)
+        }, True)
+        return
+    tipo, ease_in, ease_out = CURVAS_FUSION[curva]
+    curvas = _modificador(alvo, nome, "LUTLookup")  # AnimCurves
+    curvas.SetInput("Source", "Custom")
+    curvas.SetInput("Curve", tipo)
+    curvas.SetInput("EaseIn", ease_in)
+    curvas.SetInput("EaseOut", ease_out)
+    curvas.SetInput("Scale", fim - inicio)
+    curvas.SetInput("Offset", inicio)
+    # Rampa de tempo: 0 no primeiro frame e 1 no último, com dois keyframes lineares.
+    rampa = _modificador(curvas, "Input", "BezierSpline")
+    rampa.SetKeyFrames({frame_inicial: _chave(0.0), frame_inicial + duracao: _chave(1.0)}, True)
 
 
 def inserir_depois(comp, origem, tipo, trilhas, frame_inicial, duracao):
     """Cria o nó animado logo depois de `origem`, mantendo as conexões."""
-    nome = _nome_livre(comp, tipo)
     destinos = list((origem.Output.GetConnectedInputs() or {}).values())
-    colar(comp, montar_setting(tipo, nome, trilhas, frame_inicial, duracao))
-    novo = comp.FindTool(nome)
+    novo = comp.AddTool(tipo, -32768, -32768)
     if novo is None:
-        raise RuntimeError("O Fusion não criou o nó %s." % nome)
-    _posicionar_depois(comp, origem, novo)
+        raise RuntimeError("O Fusion não criou o nó %s." % tipo)
+    novo.SetAttrs({"TOOLS_Name": _nome_livre(comp, tipo)})
+    if tipo == "BrightnessContrast":
+        novo.SetInput("ProcessAlpha", 1)
+    for nome, inicio, fim, curva in trilhas:
+        if nome == "Center":
+            xy = _modificador(novo, "Center", "XYPath")
+            for eixo, a, b in (("X", inicio[0], fim[0]), ("Y", inicio[1], fim[1])):
+                _animar_numero(xy, eixo, a, b, curva, frame_inicial, duracao, nome)
+        else:
+            _animar_numero(novo, nome, inicio, fim, curva, frame_inicial, duracao, nome)
     novo.ConnectInput("Input", origem)
     for entrada in destinos:
         entrada.ConnectTo(novo.Output)
+    _posicionar_depois(comp, origem, novo)
     return novo
 
 

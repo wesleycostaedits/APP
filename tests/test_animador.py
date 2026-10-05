@@ -16,6 +16,9 @@ class FakeOutput:
     def GetConnectedInputs(self):
         return {i + 1: inp for i, inp in enumerate(self.connected)}
 
+    def GetTool(self):
+        return self.tool
+
 
 class FakeInput:
     def __init__(self, owner):
@@ -33,23 +36,44 @@ class FakeInput:
 
 
 class FakeTool:
+    """Imita um nó (ou modificador) do Fusion: inputs como atributos, valores e keyframes."""
+
     def __init__(self, kind, comp=None):
         self.Name = kind
         self.kind = kind
         self.comp = comp
         self.Output = FakeOutput(self)
-        self.Input = FakeInput(self)
-        self.modifiers = {}
+        self.entradas = {"Input": FakeInput(self)}
         self.values = {}
+        self.keyframes = None
+
+    @property
+    def Input(self):
+        return self.entradas["Input"]
+
+    def __getattr__(self, nome):
+        if nome[:1].isupper():
+            return self.entradas.setdefault(nome, FakeInput(self))
+        raise AttributeError(nome)
 
     def ConnectInput(self, name, tool):
-        self.Input.ConnectTo(tool.Output)
+        getattr(self, name).ConnectTo(tool.Output)
 
     def AddModifier(self, name, kind):
-        self.modifiers[name] = kind
+        modificador = FakeTool(kind, self.comp)
+        getattr(self, name).ConnectTo(modificador.Output)
+        return True
+
+    def mod(self, nome):
+        """Modificador ligado ao input `nome` (para os testes)."""
+        saida = getattr(self, nome).source
+        return saida.tool if saida else None
 
     def SetInput(self, name, value, frame=None):
-        self.values.setdefault(name, {})[frame] = value
+        self.values[name] = value
+
+    def SetKeyFrames(self, chaves, substituir):
+        self.keyframes = {f: v[1] for f, v in chaves.items()}
 
     def SetAttrs(self, attrs):
         self.Name = attrs.get("TOOLS_Name", self.Name)
@@ -64,24 +88,11 @@ class FakeComp:
     def __init__(self):
         self.tools = []
         self.undo = []
-        self.scripts = []
 
     def AddTool(self, kind, x, y):
         tool = FakeTool(kind, self)
         self.tools.append(tool)
         return tool
-
-    def Execute(self, script):
-        """Simula o comp:Paste do Fusion: cria o nó principal do texto colado."""
-        self.scripts.append(script)
-        nome, tipo = re.search(r"^\t\t(\w+) = (\w+) \{", script, re.M).groups()
-        tool = FakeTool(tipo, self)
-        tool.Name = nome
-        tool.setting = script.split("[==[", 1)[1].rsplit("]==]", 1)[0]
-        self.tools.append(tool)
-
-    def FindTool(self, nome):
-        return next((t for t in self.tools if t.Name == nome), None)
 
     def GetToolList(self, selecionados=False, tipo=None):
         tools = [t for t in self.tools if tipo is None or t.kind == tipo]
@@ -165,51 +176,70 @@ class TestAplicar(unittest.TestCase):
     def test_curva_vem_do_animcurves_com_dois_keyframes(self):
         comp = FakeComp()
         an.aplicar_preset(comp, FakeTool("Img", comp), "Zoom Pop", 5, 30, easing="Elástico")
-        s = comp.tools[0].setting
-        self.assertIn('AnimadorTransform1Size = LUTLookup', s)
-        self.assertIn('Curve = Input { Value = FuID { "Easing" }, }', s)
-        self.assertIn('EaseOut = Input { Value = FuID { "Elastic" }, }', s)
-        self.assertEqual(chaves(s, "AnimadorTransform1SizeTempo"), [5, 35])
-        self.assertEqual(entrada(s, "AnimadorTransform1Size", "Offset"), 0)
-        self.assertEqual(entrada(s, "AnimadorTransform1Size", "Scale"), 1)
+        curvas = comp.tools[0].mod("Size")
+        self.assertEqual(curvas.kind, "LUTLookup")
+        self.assertEqual(curvas.values, {"Source": "Custom", "Curve": "Easing", "EaseIn": "Linear",
+                                         "EaseOut": "Elastic", "Scale": 1.0, "Offset": 0.0})
+        rampa = curvas.mod("Input")
+        self.assertEqual((rampa.kind, rampa.keyframes), ("BezierSpline", {5: 0.0, 35: 1.0}))
 
     def test_center_usa_xypath_com_eixos_separados(self):
         comp = FakeComp()
         an.aplicar_preset(comp, FakeTool("Img", comp), "Deslizar de baixo", 0, 4)
-        s = comp.tools[0].setting
-        self.assertIn("AnimadorTransform1Center = XYPath", s)
-        self.assertEqual(entrada(s, "AnimadorTransform1Center", "X"), 0.5)
-        self.assertEqual(entrada(s, "AnimadorTransform1CenterY", "Offset"), -0.5)
-        self.assertEqual(entrada(s, "AnimadorTransform1CenterY", "Scale"), 1)
+        xy = comp.tools[0].mod("Center")
+        self.assertEqual(xy.kind, "XYPath")
+        self.assertEqual(xy.values["X"], 0.5)
+        y = xy.mod("Y")
+        self.assertEqual((y.values["Offset"], y.values["Scale"]), (-0.5, 1.0))
+        self.assertEqual(y.mod("Input").keyframes, {0: 0.0, 4: 1.0})
 
     def test_valor_constante_nao_cria_animacao(self):
         comp = FakeComp()
         an.aplicar_preset(comp, FakeTool("Img", comp), "Panorâmica para a direita", 0, 10)
-        s = comp.tools[0].setting
-        self.assertEqual(entrada(s, "AnimadorTransform1", "Size"), 1.2)
-        self.assertNotIn("AnimadorTransform1Size =", s)
+        transform = comp.tools[0]
+        self.assertEqual(transform.values["Size"], 1.2)
+        self.assertIsNone(transform.mod("Size"))
 
     def test_oscilacao_usa_keyframes(self):
         comp = FakeComp()
         an.aplicar_preset(comp, FakeTool("Img", comp), "Balançar", 10, 20)
-        s = comp.tools[0].setting
-        self.assertEqual(chaves(s, "AnimadorTransform1Angle"), list(range(10, 31)))
+        spline = comp.tools[0].mod("Angle")
+        self.assertEqual(spline.kind, "BezierSpline")
+        self.assertEqual(sorted(spline.keyframes), list(range(10, 31)))
 
     def test_fade_usa_um_brightness_contrast(self):
         comp = FakeComp()
         an.aplicar_preset(comp, FakeTool("Img", comp), "Fade In", 5, 10)
         self.assertEqual([t.kind for t in comp.tools], ["BrightnessContrast"])
-        s = comp.tools[0].setting
-        self.assertEqual(entrada(s, "AnimadorBrightnessContrast1", "ProcessAlpha"), 1)
-        self.assertEqual(chaves(s, "AnimadorBrightnessContrast1GainTempo"), [5, 15])
+        fade = comp.tools[0]
+        self.assertEqual(fade.values["ProcessAlpha"], 1)
+        self.assertEqual(fade.mod("Gain").mod("Input").keyframes, {5: 0.0, 15: 1.0})
 
-    def test_todos_os_presets_e_curvas_geram_texto(self):
+    def test_todos_os_presets_e_curvas_funcionam(self):
         for preset in an.PRESETS:
             for easing in [None] + list(an.EASINGS):
                 comp = FakeComp()
                 an.aplicar_preset(comp, FakeTool("Img", comp), preset, 0, 12, easing, 1.5)
-                for tool in comp.tools:
-                    self.assertTrue(tool.setting.startswith("{\n\tTools = ordered() {"))
+                self.assertIn(len(comp.tools), (1, 2))
+
+
+class TestSetting(unittest.TestCase):
+    """montar_setting gera o mesmo nó como texto .setting, para colar no Fusion."""
+
+    def test_formato_igual_ao_exportado_pelo_fusion(self):
+        s = an.montar_setting("Transform", "T1", an.gerar_trilhas("Zoom Pop", "Elástico"), 5, 30)
+        self.assertTrue(s.startswith("{\n\tTools = ordered() {"))
+        self.assertIn("T1Size = LUTLookup", s)
+        self.assertIn('EaseOut = Input { Value = FuID { "Elastic" }, }', s)
+        self.assertEqual(chaves(s, "T1SizeTempo"), [5, 35])
+        self.assertEqual(entrada(s, "T1Size", "Scale"), 1)
+
+    def test_center_e_constantes(self):
+        s = an.montar_setting("Transform", "T1",
+                              an.gerar_trilhas("Panorâmica para a direita"), 0, 10)
+        self.assertEqual(entrada(s, "T1", "Size"), 1.2)
+        self.assertEqual(entrada(s, "T1Center", "Y"), 0.5)
+        self.assertEqual(entrada(s, "T1CenterX", "Offset"), 0.44)
 
 
 class TestOpcoes(unittest.TestCase):
