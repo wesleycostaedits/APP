@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 import unittest
 
@@ -63,11 +64,24 @@ class FakeComp:
     def __init__(self):
         self.tools = []
         self.undo = []
+        self.scripts = []
 
     def AddTool(self, kind, x, y):
         tool = FakeTool(kind, self)
         self.tools.append(tool)
         return tool
+
+    def Execute(self, script):
+        """Simula o comp:Paste do Fusion: cria o nó principal do texto colado."""
+        self.scripts.append(script)
+        nome, tipo = re.search(r"^\t\t(\w+) = (\w+) \{", script, re.M).groups()
+        tool = FakeTool(tipo, self)
+        tool.Name = nome
+        tool.setting = script.split("[==[", 1)[1].rsplit("]==]", 1)[0]
+        self.tools.append(tool)
+
+    def FindTool(self, nome):
+        return next((t for t in self.tools if t.Name == nome), None)
 
     def GetToolList(self, selecionados=False, tipo=None):
         tools = [t for t in self.tools if tipo is None or t.kind == tipo]
@@ -84,6 +98,18 @@ class FakeComp:
 
     def Unlock(self):
         pass
+
+
+def entrada(setting, bloco, nome):
+    """Valor numérico do input `nome` dentro do bloco `bloco` de um texto colado."""
+    corpo = re.search(r"\t\t%s = \w+ \{(.*?)\n\t\t\}" % bloco, setting, re.S).group(1)
+    return float(re.search(r"%s = Input \{ Value = ([-\d.e]+)" % nome, corpo).group(1))
+
+
+def chaves(setting, bloco):
+    """Frames dos keyframes de um BezierSpline do texto colado."""
+    corpo = re.search(r"\t\t%s = BezierSpline \{(.*?)\n\t\t\}" % bloco, setting, re.S).group(1)
+    return [int(f) for f in re.findall(r"\[(-?\d+)\] = \{", corpo)]
 
 
 class TestEasings(unittest.TestCase):
@@ -121,37 +147,69 @@ class TestKeyframes(unittest.TestCase):
 
 
 class TestAplicar(unittest.TestCase):
-    def test_insere_transform_e_mantem_conexoes(self):
+    def test_insere_um_transform_e_mantem_conexoes(self):
         comp = FakeComp()
-        texto = FakeTool("Text1")
-        merge = FakeTool("Merge1")
+        texto = FakeTool("Text1", comp)
+        merge = FakeTool("Merge1", comp)
         merge.Input.ConnectTo(texto.Output)
 
         an.aplicar_preset(comp, texto, "Girar e aparecer", 0, 10)
 
+        self.assertEqual(len(comp.tools), 1)
         transform = comp.tools[0]
-        self.assertEqual(transform.Name, "AnimadorTransform1")
+        self.assertEqual((transform.kind, transform.Name), ("Transform", "AnimadorTransform1"))
         self.assertIs(transform.Input.source, texto.Output)
         self.assertIs(merge.Input.source, transform.Output)
-        self.assertEqual(transform.modifiers, {"Angle": "BezierSpline", "Size": "BezierSpline"})
-        self.assertEqual(transform.values["Size"][10], 1.0)
         self.assertEqual(comp.undo, ["Animador: Girar e aparecer"])
 
-    def test_center_usa_xypath_com_pontos(self):
+    def test_curva_vem_do_animcurves_com_dois_keyframes(self):
         comp = FakeComp()
-        an.aplicar_preset(comp, FakeTool("Text1"), "Deslizar de baixo", 0, 4)
-        transform = comp.tools[0]
-        self.assertEqual(transform.modifiers["Center"], "XYPath")
-        self.assertEqual(transform.values["Center"][0], {1: 0.5, 2: -0.5})
+        an.aplicar_preset(comp, FakeTool("Img", comp), "Zoom Pop", 5, 30, easing="Elástico")
+        s = comp.tools[0].setting
+        self.assertIn('AnimadorTransform1Size = LUTLookup', s)
+        self.assertIn('Curve = Input { Value = FuID { "Easing" }, }', s)
+        self.assertIn('EaseOut = Input { Value = FuID { "Elastic" }, }', s)
+        self.assertEqual(chaves(s, "AnimadorTransform1SizeTempo"), [5, 35])
+        self.assertEqual(entrada(s, "AnimadorTransform1Size", "Offset"), 0)
+        self.assertEqual(entrada(s, "AnimadorTransform1Size", "Scale"), 1)
 
-    def test_fade_usa_brightness_contrast(self):
+    def test_center_usa_xypath_com_eixos_separados(self):
         comp = FakeComp()
-        an.aplicar_preset(comp, FakeTool("Text1"), "Fade In", 5, 10)
+        an.aplicar_preset(comp, FakeTool("Img", comp), "Deslizar de baixo", 0, 4)
+        s = comp.tools[0].setting
+        self.assertIn("AnimadorTransform1Center = XYPath", s)
+        self.assertEqual(entrada(s, "AnimadorTransform1Center", "X"), 0.5)
+        self.assertEqual(entrada(s, "AnimadorTransform1CenterY", "Offset"), -0.5)
+        self.assertEqual(entrada(s, "AnimadorTransform1CenterY", "Scale"), 1)
+
+    def test_valor_constante_nao_cria_animacao(self):
+        comp = FakeComp()
+        an.aplicar_preset(comp, FakeTool("Img", comp), "Panorâmica para a direita", 0, 10)
+        s = comp.tools[0].setting
+        self.assertEqual(entrada(s, "AnimadorTransform1", "Size"), 1.2)
+        self.assertNotIn("AnimadorTransform1Size =", s)
+
+    def test_oscilacao_usa_keyframes(self):
+        comp = FakeComp()
+        an.aplicar_preset(comp, FakeTool("Img", comp), "Balançar", 10, 20)
+        s = comp.tools[0].setting
+        self.assertEqual(chaves(s, "AnimadorTransform1Angle"), list(range(10, 31)))
+
+    def test_fade_usa_um_brightness_contrast(self):
+        comp = FakeComp()
+        an.aplicar_preset(comp, FakeTool("Img", comp), "Fade In", 5, 10)
         self.assertEqual([t.kind for t in comp.tools], ["BrightnessContrast"])
-        fade = comp.tools[0]
-        self.assertEqual(fade.values["ProcessAlpha"][None], 1)
-        self.assertEqual(fade.values["Gain"][5], 0.0)
-        self.assertAlmostEqual(fade.values["Gain"][15], 1.0)
+        s = comp.tools[0].setting
+        self.assertEqual(entrada(s, "AnimadorBrightnessContrast1", "ProcessAlpha"), 1)
+        self.assertEqual(chaves(s, "AnimadorBrightnessContrast1GainTempo"), [5, 15])
+
+    def test_todos_os_presets_e_curvas_geram_texto(self):
+        for preset in an.PRESETS:
+            for easing in [None] + list(an.EASINGS):
+                comp = FakeComp()
+                an.aplicar_preset(comp, FakeTool("Img", comp), preset, 0, 12, easing, 1.5)
+                for tool in comp.tools:
+                    self.assertTrue(tool.setting.startswith("{\n\tTools = ordered() {"))
 
 
 class TestOpcoes(unittest.TestCase):
@@ -197,6 +255,7 @@ class TestNos(unittest.TestCase):
 
         an.aplicar_preset(comp, imagem, "Desfoque de entrada", 0, 10)
 
+        self.assertEqual(len(comp.tools), 4)
         blur, fade = comp.tools[2], comp.tools[3]
         self.assertEqual((blur.kind, fade.kind), ("Blur", "BrightnessContrast"))
         self.assertIs(blur.Input.source, imagem.Output)

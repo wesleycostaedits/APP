@@ -61,6 +61,22 @@ No DaVinci Resolve Studio, abra **Preferences → System → General**, mude
 Cada clipe ganha uma composição Fusion com a animação. Para tirar, selecione os
 clipes e use **Limpar clipes**: só os nós criados pelo Animador são removidos.
 
+### Como a animação fica no Fusion
+
+Cada animação vira **um nó só**, logo depois da imagem:
+
+- **Transform** para movimento, tamanho e rotação. A curva (Elástico, Quique,
+  Suave...) vem de um modificador **AnimCurves**, guiado por uma rampa de tempo
+  com apenas dois keyframes lineares. Para mudar a duração depois, basta mover
+  esses dois keyframes no Spline.
+- **BrightnessContrast** para Fade e Piscar (o Transform não tem opacidade).
+- **Blur** para desfoque.
+
+As animações que juntam movimento e opacidade (Surgir, Aproximar) ou desfoque
+e opacidade (Desfoque de entrada/saída) usam dois nós. As oscilações (Pulsar,
+Respirar, Balançar, Tremer, Piscar) usam keyframes, porque o AnimCurves não faz
+ida e volta.
+
 ### Recursos
 
 - **Favoritos** (★), **Recentes** e **Meus presets** (salve uma animação com

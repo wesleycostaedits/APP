@@ -20,7 +20,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import Animador  # noqa: E402
 
-VERSAO = "2.0.1"
+VERSAO = "2.1.0"
 REPOSITORIO = "wesleycostaedits/app"
 POSICOES = ("Início do clipe", "Fim do clipe")
 

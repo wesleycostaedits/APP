@@ -3,8 +3,9 @@ Animador - presets de animação para o DaVinci Resolve (página Fusion).
 
 Como usar: selecione o nó da imagem na página Fusion (MediaIn ou Loader),
 abra Workspace > Scripts > Comp > Animador, escolha o preset e clique em
-"Aplicar". O script insere os nós necessários (Transform, Blur ou
-BrightnessContrast) logo depois do nó selecionado e cria os keyframes.
+"Aplicar". O script insere um nó animado (Transform; BrightnessContrast para
+fades; Blur para desfoque) logo depois do nó selecionado, com a curva feita
+por um modificador AnimCurves.
 "Remover" apaga os nós criados pelo Animador nessa composição.
 
 A parte de cálculo (easings e presets) não depende do DaVinci, então pode ser
@@ -210,47 +211,208 @@ def _limitar(nome, valor):
 
 
 def gerar_keyframes(preset, frame_inicial, duracao, easing=None, intensidade=1.0):
-    """Devolve {input: [(frame, valor), ...]} com um keyframe por frame.
+    """Devolve {input: [(frame, valor), ...]} com um valor por frame (usado na prévia).
 
     `easing` (um nome de EASINGS) substitui a curva do preset, exceto nas
     oscilações. `intensidade` aumenta (>1) ou suaviza (<1) o movimento.
     """
-    if preset not in PRESETS:
-        raise ValueError("Preset desconhecido: %s" % preset)
     if duracao < 1:
         raise ValueError("A duração precisa ser de pelo menos 1 frame")
-    if easing is not None and easing not in EASINGS:
-        raise ValueError("Curva desconhecida: %s" % easing)
     resultado = {}
-    for nome, inicio, fim, curva in PRESETS[preset]:
-        if easing is not None and curva not in OSCILACOES:
-            curva = EASINGS[easing]
-        neutro = NEUTRO[nome]
-        inicio = escalar(inicio, neutro, intensidade)
-        fim = escalar(fim, neutro, intensidade)
-        keys = []
-        for i in range(duracao + 1):
-            valor = interpolar(inicio, fim, curva(i / duracao))
-            keys.append((frame_inicial + i, _limitar(nome, valor)))
-        resultado[nome] = keys
+    for nome, inicio, fim, curva in gerar_trilhas(preset, easing, intensidade):
+        resultado[nome] = [
+            (frame_inicial + i, _limitar(nome, interpolar(inicio, fim, curva(i / duracao))))
+            for i in range(duracao + 1)
+        ]
     return resultado
 
 
 # ---------------------------------------------------------------------------
 # Integração com o Fusion
+#
+# Cada animação vira UM nó (Transform, BrightnessContrast ou Blur) cujos inputs
+# são guiados por um modificador AnimCurves: uma rampa linear de tempo com só
+# dois keyframes (0 no início, 1 no fim) passa pela curva escolhida (Easing,
+# Elastic, Bounce...) e é convertida no valor final com Scale e Offset. As
+# oscilações (Pulsar, Balançar...) usam um BezierSpline com keyframes.
+# O nó é montado como texto de configuração do Fusion e colado na composição.
 # ---------------------------------------------------------------------------
 
 PREFIXO = "Animador"  # nome dado aos nós criados, para poder removê-los depois
 
-# input animado -> (tipo do nó, modificador)
+# input animado -> tipo do nó
 NOS = {
-    "Center": ("Transform", "XYPath"),
-    "Size": ("Transform", "BezierSpline"),
-    "Angle": ("Transform", "BezierSpline"),
-    "XBlurSize": ("Blur", "BezierSpline"),
-    "Gain": ("BrightnessContrast", "BezierSpline"),
+    "Center": "Transform",
+    "Size": "Transform",
+    "Angle": "Transform",
+    "XBlurSize": "Blur",
+    "Gain": "BrightnessContrast",
 }
 ORDEM_NOS = ("Transform", "Blur", "BrightnessContrast")
+
+# curva do motor -> (Curve, EaseIn, EaseOut) do AnimCurves
+CURVAS_FUSION = {
+    linear: ("Linear", "Linear", "Linear"),
+    ease_in_out_sine: ("Easing", "Sine", "Sine"),
+    ease_out_cubic: ("Easing", "Linear", "Cubic"),
+    ease_in_cubic: ("Easing", "Cubic", "Linear"),
+    ease_out_back: ("Easing", "Linear", "Back"),
+    ease_in_back: ("Easing", "Back", "Linear"),
+    ease_out_elastic: ("Easing", "Linear", "Elastic"),
+    ease_out_bounce: ("Easing", "Linear", "Bounce"),
+}
+
+
+def gerar_trilhas(preset, easing=None, intensidade=1.0):
+    """[(input, inicio, fim, curva)] já com a curva e a intensidade aplicadas."""
+    if preset not in PRESETS:
+        raise ValueError("Preset desconhecido: %s" % preset)
+    if easing is not None and easing not in EASINGS:
+        raise ValueError("Curva desconhecida: %s" % easing)
+    trilhas = []
+    for nome, inicio, fim, curva in PRESETS[preset]:
+        if easing is not None and curva not in OSCILACOES:
+            curva = EASINGS[easing]
+        neutro = NEUTRO[nome]
+        trilhas.append((nome, escalar(inicio, neutro, intensidade),
+                        escalar(fim, neutro, intensidade), curva))
+    return trilhas
+
+
+def _num(valor):
+    return "%.6g" % valor
+
+
+def _rampa(frame_inicial, duracao):
+    """Tempo da animação: 0 no primeiro frame e 1 no último, em linha reta."""
+    fim = frame_inicial + duracao
+    terco = duracao / 3.0
+    return ("BezierSpline {\n"
+            "\t\t\tSplineColor = { Red = 104, Green = 195, Blue = 244 },\n"
+            "\t\t\tNameSet = true,\n"
+            "\t\t\tKeyFrames = {\n"
+            "\t\t\t\t[%s] = { 0, RH = { %s, 0.333333333333333 }, Flags = { Linear = true } },\n"
+            "\t\t\t\t[%s] = { 1, LH = { %s, 0.666666666666667 }, Flags = { Linear = true } }\n"
+            "\t\t\t}\n"
+            "\t\t}" % (frame_inicial, _num(frame_inicial + terco), fim, _num(fim - terco)))
+
+
+LOOKUP_LINEAR = ("LUTBezier {\n"
+                 "\t\t\tKeyColorSplines = {\n"
+                 "\t\t\t\t[0] = {\n"
+                 "\t\t\t\t\t[0] = { 0, RH = { 0.333333333333333, 0.333333333333333 }, "
+                 "Flags = { Linear = true } },\n"
+                 "\t\t\t\t\t[1] = { 1, LH = { 0.666666666666667, 0.666666666666667 }, "
+                 "Flags = { Linear = true } }\n"
+                 "\t\t\t\t}\n"
+                 "\t\t\t},\n"
+                 "\t\t\tSplineColor = { Red = 255, Green = 255, Blue = 255 },\n"
+                 "\t\t\tNameSet = true,\n"
+                 "\t\t}")
+
+
+class _Setting:
+    """Monta o texto `{ Tools = ordered() { ... } }` que o Fusion sabe colar."""
+
+    def __init__(self):
+        self.blocos = []
+
+    def add(self, nome, corpo):
+        self.blocos.append("\t\t%s = %s" % (nome, corpo))
+
+    def animcurves(self, nome, inicio, fim, curva, frame_inicial, duracao):
+        tipo, ease_in, ease_out = CURVAS_FUSION[curva]
+        self.add(nome, (
+            "LUTLookup {\n"
+            "\t\t\tNameSet = true,\n"
+            "\t\t\tInputs = {\n"
+            "\t\t\t\tSource = Input { Value = FuID { \"Custom\" }, },\n"
+            "\t\t\t\tInput = Input { SourceOp = \"%sTempo\", Source = \"Value\", },\n"
+            "\t\t\t\tCurve = Input { Value = FuID { \"%s\" }, },\n"
+            "\t\t\t\tEaseIn = Input { Value = FuID { \"%s\" }, },\n"
+            "\t\t\t\tEaseOut = Input { Value = FuID { \"%s\" }, },\n"
+            "\t\t\t\tScale = Input { Value = %s, },\n"
+            "\t\t\t\tOffset = Input { Value = %s, },\n"
+            "\t\t\t\tLookup = Input { SourceOp = \"%sLookup\", Source = \"Value\", },\n"
+            "\t\t\t},\n"
+            "\t\t}" % (nome, tipo, ease_in, ease_out, _num(fim - inicio), _num(inicio), nome)))
+        self.add(nome + "Tempo", _rampa(frame_inicial, duracao))
+        self.add(nome + "Lookup", LOOKUP_LINEAR)
+
+    def keyframes(self, nome, inicio, fim, curva, frame_inicial, duracao, limitar):
+        chaves = []
+        for i in range(duracao + 1):
+            valor = limitar(interpolar(inicio, fim, curva(i / duracao)))
+            chaves.append("\t\t\t\t[%d] = { %s, Flags = { Linear = true } }"
+                          % (frame_inicial + i, _num(valor)))
+        self.add(nome, ("BezierSpline {\n"
+                        "\t\t\tSplineColor = { Red = 225, Green = 255, Blue = 0 },\n"
+                        "\t\t\tNameSet = true,\n"
+                        "\t\t\tKeyFrames = {\n%s\n\t\t\t}\n"
+                        "\t\t}" % ",\n".join(chaves)))
+
+    def texto(self):
+        return "{\n\tTools = ordered() {\n%s\n\t}\n}" % ",\n".join(self.blocos)
+
+
+def montar_setting(tipo, nome, trilhas, frame_inicial, duracao, posicao=None):
+    """Texto de configuração com UM nó `tipo` chamado `nome` e suas animações."""
+    s = _Setting()
+    entradas = []
+    if tipo == "BrightnessContrast":
+        entradas.append("\t\t\t\tProcessAlpha = Input { Value = 1, },")
+
+    def animar_numero(chave, inicio, fim, curva, input_nome):
+        if curva in OSCILACOES:
+            s.keyframes(chave, inicio, fim, curva, frame_inicial, duracao,
+                        lambda v: _limitar(input_nome, v))
+        else:
+            s.animcurves(chave, inicio, fim, curva, frame_inicial, duracao)
+
+    modificadores = []
+    for input_nome, inicio, fim, curva in trilhas:
+        chave = "%s%s" % (nome, input_nome)
+        if input_nome == "Center":
+            # Ponto: um XYPath com X e Y animados separadamente.
+            eixos = []
+            for eixo, a, b in (("X", inicio[0], fim[0]), ("Y", inicio[1], fim[1])):
+                if a == b and curva not in OSCILACOES:
+                    eixos.append("\t\t\t\t%s = Input { Value = %s, }," % (eixo, _num(a)))
+                    continue
+                sub = chave + eixo
+                modificadores.append((sub, a, b, curva, input_nome))
+                eixos.append("\t\t\t\t%s = Input { SourceOp = \"%s\", Source = \"Value\", },"
+                             % (eixo, sub))
+            s_xy = ("XYPath {\n"
+                    "\t\t\tShowKeyPoints = false,\n"
+                    "\t\t\tDrawMode = \"ModifyOnly\",\n"
+                    "\t\t\tNameSet = true,\n"
+                    "\t\t\tInputs = {\n%s\n\t\t\t},\n"
+                    "\t\t}" % "\n".join(eixos))
+            modificadores.append((chave, s_xy, None, None, None))
+            entradas.append("\t\t\t\tCenter = Input { SourceOp = \"%s\", Source = \"Value\", },"
+                            % chave)
+        elif inicio == fim and curva not in OSCILACOES:
+            entradas.append("\t\t\t\t%s = Input { Value = %s, }," % (input_nome, _num(inicio)))
+        else:
+            modificadores.append((chave, inicio, fim, curva, input_nome))
+            entradas.append("\t\t\t\t%s = Input { SourceOp = \"%s\", Source = \"Value\", },"
+                            % (input_nome, chave))
+
+    vista = ""
+    if posicao:
+        vista = "\t\t\tViewInfo = OperatorInfo { Pos = { %s, %s } },\n" % (
+            _num(posicao[0]), _num(posicao[1]))
+    s.add(nome, ("%s {\n"
+                 "\t\t\tNameSet = true,\n"
+                 "\t\t\tInputs = {\n%s\n\t\t\t},\n%s"
+                 "\t\t}" % (tipo, "\n".join(entradas), vista)))
+    for chave, inicio, fim, curva, input_nome in modificadores:
+        if input_nome is None:
+            s.add(chave, inicio)  # XYPath já montado
+        else:
+            animar_numero(chave, inicio, fim, curva, input_nome)
+    return s.texto()
 
 
 def _nome_livre(comp, tipo):
@@ -261,11 +423,30 @@ def _nome_livre(comp, tipo):
     return "%s%s%d" % (PREFIXO, tipo, n)
 
 
-def inserir_depois(comp, origem, tipo):
-    """Cria um nó do tipo pedido logo depois de `origem`, mantendo as conexões."""
+def _posicionar_depois(comp, origem, novo):
+    """Coloca `novo` no Flow logo à direita de `origem` (se o Fusion permitir)."""
+    try:
+        flow = comp.CurrentFrame.FlowView
+        pos = flow.GetPosTable(origem)
+        flow.SetPos(novo, float(pos[1]) + 1, float(pos[2]))
+    except Exception:
+        pass
+
+
+def colar(comp, texto):
+    """Cola um texto de configuração na composição (via Lua, que tem bmd.readstring)."""
+    comp.Execute("comp:Paste(bmd.readstring([==[%s]==]))" % texto)
+
+
+def inserir_depois(comp, origem, tipo, trilhas, frame_inicial, duracao):
+    """Cria o nó animado logo depois de `origem`, mantendo as conexões."""
+    nome = _nome_livre(comp, tipo)
     destinos = list((origem.Output.GetConnectedInputs() or {}).values())
-    novo = comp.AddTool(tipo, -32768, -32768)
-    novo.SetAttrs({"TOOLS_Name": _nome_livre(comp, tipo)})
+    colar(comp, montar_setting(tipo, nome, trilhas, frame_inicial, duracao))
+    novo = comp.FindTool(nome)
+    if novo is None:
+        raise RuntimeError("O Fusion não criou o nó %s." % nome)
+    _posicionar_depois(comp, origem, novo)
     novo.ConnectInput("Input", origem)
     for entrada in destinos:
         entrada.ConnectTo(novo.Output)
@@ -274,25 +455,22 @@ def inserir_depois(comp, origem, tipo):
 
 def aplicar_preset(comp, ferramenta, preset, frame_inicial, duracao,
                    easing=None, intensidade=1.0):
-    """Insere os nós do preset depois de `ferramenta`. Devolve o último nó criado."""
-    keyframes = gerar_keyframes(preset, frame_inicial, duracao, easing, intensidade)
+    """Insere o nó do preset depois de `ferramenta`. Devolve o último nó criado.
+
+    Animações de movimento, tamanho e rotação usam um único Transform; fade usa
+    um BrightnessContrast e desfoque um Blur.
+    """
+    if duracao < 1:
+        raise ValueError("A duração precisa ser de pelo menos 1 frame")
+    trilhas = gerar_trilhas(preset, easing, intensidade)
     comp.StartUndo("Animador: " + preset)
     comp.Lock()
     try:
         ultimo = ferramenta
         for tipo in ORDEM_NOS:
-            inputs = [n for n in keyframes if NOS[n][0] == tipo]
-            if not inputs:
-                continue
-            ultimo = inserir_depois(comp, ultimo, tipo)
-            if tipo == "BrightnessContrast":
-                ultimo.SetInput("ProcessAlpha", 1)
-            for nome in inputs:
-                ultimo.AddModifier(nome, NOS[nome][1])
-                for frame, valor in keyframes[nome]:
-                    if isinstance(valor, tuple):
-                        valor = {1: valor[0], 2: valor[1]}
-                    ultimo.SetInput(nome, valor, frame)
+            do_tipo = [t for t in trilhas if NOS[t[0]] == tipo]
+            if do_tipo:
+                ultimo = inserir_depois(comp, ultimo, tipo, do_tipo, frame_inicial, duracao)
         return ultimo
     finally:
         comp.Unlock()

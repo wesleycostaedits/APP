@@ -6,7 +6,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import AnimadorApp as app  # noqa: E402
-from test_animador import FakeComp, FakeTool  # noqa: E402
+from test_animador import FakeComp, FakeTool, chaves, entrada  # noqa: E402
 
 
 class FakeTimelineComp(FakeComp):
@@ -65,7 +65,7 @@ class TestAnimadorApp(unittest.TestCase):
         comp = item.comps[0]
         transform = comp.tools[1]
         self.assertIs(transform.Input.source, comp.media_in.Output)
-        self.assertEqual(min(transform.values["Size"]), 0)
+        self.assertEqual(entrada(transform.setting, "AnimadorTransform1Size", "Offset"), 0)
 
     def test_reusa_comp_existente(self):
         item = FakeItem(comps=1)
@@ -75,14 +75,14 @@ class TestAnimadorApp(unittest.TestCase):
     def test_fim_do_clipe_termina_no_ultimo_frame(self):
         item = FakeItem(comps=1, duracao=100)
         app.aplicar_em_clipe(item, "Fade Out", 24, app.POSICOES[1])
-        gain = item.comps[0].tools[1].values["Gain"]
-        self.assertEqual(min(gain), 75)
-        self.assertEqual(max(gain), 99)
+        s = item.comps[0].tools[1].setting
+        self.assertEqual(chaves(s, "AnimadorBrightnessContrast1GainTempo"), [75, 99])
 
     def test_duracao_maior_que_clipe_e_limitada(self):
         item = FakeItem(comps=1, duracao=10)
         app.aplicar_em_clipe(item, "Fade In", 500, app.POSICOES[0])
-        self.assertEqual(max(item.comps[0].tools[1].values["Gain"]), 9)
+        s = item.comps[0].tools[1].setting
+        self.assertEqual(chaves(s, "AnimadorBrightnessContrast1GainTempo"), [0, 9])
 
     def test_listar_clipes_de_todas_as_trilhas(self):
         a, b, c = FakeItem(), FakeItem(), FakeItem()
@@ -96,14 +96,15 @@ class TestAnimadorApp(unittest.TestCase):
         tipos = sorted(t.kind for t in comp.tools)
         self.assertEqual(tipos, ["BrightnessContrast", "MediaIn1", "Transform"])
         fade = [t for t in comp.tools if t.kind == "BrightnessContrast"][0]
-        self.assertEqual((min(fade.values["Gain"]), max(fade.values["Gain"])), (79, 99))
+        self.assertEqual(chaves(fade.setting, "AnimadorBrightnessContrast1GainTempo"), [79, 99])
 
     def test_curva_e_intensidade_chegam_ao_motor(self):
         item = FakeItem(comps=1)
         app.aplicar_em_clipe(item, "Ken Burns", 10, app.POSICOES[0], "Linear", 2.0)
-        size = item.comps[0].tools[1].values["Size"]
-        self.assertAlmostEqual(size[10], 1.4)
-        self.assertAlmostEqual(size[5], 1.2)
+        s = item.comps[0].tools[1].setting
+        self.assertIn('Curve = Input { Value = FuID { "Linear" }, }', s)
+        self.assertAlmostEqual(entrada(s, "AnimadorTransform1Size", "Offset"), 1.0)
+        self.assertAlmostEqual(entrada(s, "AnimadorTransform1Size", "Scale"), 0.4)
 
     def test_remover_do_clipe(self):
         item = FakeItem(comps=1)
