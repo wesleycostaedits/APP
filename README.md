@@ -26,6 +26,10 @@ Existem duas formas de usar:
 
 ## Animador App (programa com janela)
 
+![Tela do Animador App](docs/tela.png)
+
+Escolha a animação nos cartões e veja a **prévia ao vivo** antes de aplicar.
+
 ### Preparar (só uma vez)
 
 1. Instale o Python 3 (64 bits) em https://www.python.org/downloads/ e, na

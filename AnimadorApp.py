@@ -124,122 +124,391 @@ def aplicar_em_clipe(item, preset, duracao, posicao):
 # Interface (PySide6 / Qt)
 # ---------------------------------------------------------------------------
 
+# Ícone, nome curto (para o cartão) e descrição de cada preset.
+INFO_PRESETS = {
+    "Fade In": ("◐", "Fade In", "Aparece suavemente"),
+    "Fade Out": ("◑", "Fade Out", "Some suavemente"),
+    "Deslizar da esquerda": ("→", "Esquerda", "Entra deslizando pela esquerda"),
+    "Deslizar da direita": ("←", "Direita", "Entra deslizando pela direita"),
+    "Deslizar de baixo": ("↑", "De baixo", "Sobe deslizando de baixo"),
+    "Zoom Pop": ("✦", "Zoom Pop", "Cresce do zero com um estouro"),
+    "Quicar (cair do topo)": ("⬇", "Quicar", "Cai do topo e quica até parar"),
+    "Girar e aparecer": ("↻", "Girar", "Gira enquanto cresce"),
+    "Pulsar": ("♥", "Pulsar", "Aumenta um pouco e volta"),
+    "Ken Burns": ("▣", "Ken Burns", "Zoom lento com movimento, para fotos"),
+}
+
+
+def info_preset(nome):
+    return INFO_PRESETS.get(nome, ("•", nome, ""))
+
+LARANJA = "#ff6a3d"
+
 ESTILO = """
-QWidget { background: #1f1f23; color: #e6e6e6; font-size: 13px; }
-QGroupBox { border: 1px solid #3a3a40; border-radius: 6px; margin-top: 14px; padding: 10px; }
-QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; color: #a0a0a8; }
-QListWidget, QComboBox, QSpinBox {
-    background: #2a2a30; border: 1px solid #3a3a40; border-radius: 4px; padding: 4px;
+* { font-family: "Segoe UI", "Inter", sans-serif; font-size: 13px; }
+QWidget#raiz { background: #141418; }
+QLabel { color: #e8e8ee; background: transparent; }
+QLabel#titulo { font-size: 22px; font-weight: 700; }
+QLabel#subtitulo, QLabel#dica { color: #8a8a96; }
+QLabel#secao { color: #8a8a96; font-size: 11px; font-weight: 700; letter-spacing: 1px; }
+QLabel#pilula { border-radius: 11px; padding: 3px 12px; font-size: 12px; font-weight: 600; }
+QFrame#painel { background: #1c1c22; border: 1px solid #2a2a33; border-radius: 12px; }
+QListWidget {
+    background: transparent; border: none; color: #e8e8ee; outline: none;
 }
-QListWidget::item { padding: 5px; }
-QListWidget::item:selected { background: #e8613c; color: white; }
+QListWidget::item {
+    background: #23232b; border: 1px solid #2c2c36; border-radius: 8px;
+    padding: 9px 10px; margin: 3px 0;
+}
+QListWidget::item:hover { border-color: #444452; }
+QListWidget::item:selected { background: #3a2219; border-color: #ff6a3d; color: #ffffff; }
 QPushButton {
-    background: #34343b; border: 1px solid #45454d; border-radius: 4px; padding: 7px 12px;
+    background: #26262e; color: #e8e8ee; border: 1px solid #33333d;
+    border-radius: 8px; padding: 8px 14px; font-weight: 600;
 }
-QPushButton:hover { background: #3f3f47; }
-QPushButton#aplicar { background: #e8613c; border: none; color: white; font-weight: bold; padding: 10px; }
-QPushButton#aplicar:hover { background: #f07250; }
-QPushButton#aplicar:disabled { background: #5a3a30; color: #b0a0a0; }
-QLabel#status { color: #a0a0a8; }
+QPushButton:hover { background: #2f2f39; border-color: #45454f; }
+QToolButton#cartao {
+    background: #23232b; color: #e8e8ee; border: 1px solid #2c2c36;
+    border-radius: 10px; padding: 8px 4px; font-size: 12px; font-weight: 600;
+}
+QToolButton#cartao:hover { border-color: #55555f; }
+QToolButton#cartao:checked { background: #3a2219; border: 2px solid #ff6a3d; }
+QPushButton#segmento { border-radius: 8px; padding: 7px; }
+QPushButton#segmento:checked { background: #ff6a3d; border-color: #ff6a3d; color: white; }
+QPushButton#aplicar {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #ff6a3d, stop:1 #ff9a3d);
+    color: white; border: none; border-radius: 10px; padding: 13px; font-size: 14px;
+}
+QPushButton#aplicar:hover {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #ff7a50, stop:1 #ffaa55);
+}
+QPushButton#aplicar:disabled { background: #2a2a33; color: #6a6a76; }
+QSpinBox {
+    background: #23232b; color: #e8e8ee; border: 1px solid #2c2c36;
+    border-radius: 8px; padding: 6px 10px; min-width: 90px;
+}
+QSlider::groove:horizontal { height: 6px; background: #2c2c36; border-radius: 3px; }
+QSlider::sub-page:horizontal { background: #ff6a3d; border-radius: 3px; }
+QSlider::handle:horizontal {
+    background: white; width: 16px; height: 16px; margin: -5px 0; border-radius: 8px;
+}
+QLabel#status { border-radius: 8px; padding: 9px 12px; }
+QScrollBar:vertical { background: transparent; width: 8px; }
+QScrollBar::handle:vertical { background: #33333d; border-radius: 4px; min-height: 30px; }
+QScrollBar::add-line, QScrollBar::sub-line { height: 0; }
 """
+
+CORES_STATUS = {
+    "info": ("#23232b", "#a0a0ac"),
+    "ok": ("#16301f", "#5ee08a"),
+    "erro": ("#3a1a1a", "#ff7b7b"),
+}
 
 
 def criar_janela():
-    from PySide6.QtCore import Qt
+    from PySide6.QtCore import QPointF, QRectF, Qt, QTimer
+    from PySide6.QtGui import QColor, QLinearGradient, QPainter, QPainterPath
     from PySide6.QtWidgets import (
-        QAbstractItemView, QButtonGroup, QComboBox, QFormLayout, QGroupBox,
-        QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QPushButton,
-        QRadioButton, QSpinBox, QVBoxLayout, QWidget,
+        QAbstractItemView, QButtonGroup, QFrame, QGridLayout, QHBoxLayout,
+        QLabel, QListWidget, QListWidgetItem, QPushButton, QSizePolicy, QSlider,
+        QSpinBox, QToolButton, QVBoxLayout, QWidget,
     )
+
+    class Previa(QWidget):
+        """Desenha uma 'foto' de exemplo animada com os keyframes do preset."""
+
+        PAUSA = 18  # frames parados no fim antes de repetir
+
+        def __init__(self):
+            super().__init__()
+            self.setMinimumHeight(200)
+            self.frame = 0
+            self.definir("Fade In", 24)
+            self.timer = QTimer(self)
+            self.timer.timeout.connect(self.avancar)
+            self.timer.start(1000 // 30)
+
+        def definir(self, preset, duracao):
+            self.legenda = "%s  ·  %s" % (preset, info_preset(preset)[2])
+            self.keys = Animador.gerar_keyframes(preset, 0, duracao)
+            self.duracao = duracao
+            self.frame = 0
+            self.update()
+
+        def avancar(self):
+            self.frame = (self.frame + 1) % (self.duracao + 1 + self.PAUSA)
+            self.update()
+
+        def valor(self, nome, padrao):
+            if nome not in self.keys:
+                return padrao
+            return self.keys[nome][min(self.frame, self.duracao)][1]
+
+        def paintEvent(self, evento):
+            p = QPainter(self)
+            p.setRenderHint(QPainter.Antialiasing)
+            area = QRectF(self.rect()).adjusted(1, 1, -1, -1)
+            fundo = QPainterPath()
+            fundo.addRoundedRect(area, 10, 10)
+            p.fillPath(fundo, QColor("#0d0d10"))
+            p.setClipPath(fundo)
+
+            # "Quadro" 16:9 centralizado (acima da legenda), com a imagem de exemplo.
+            util = area.adjusted(12, 12, -12, -30)
+            larg = min(util.width(), util.height() * 16 / 9)
+            alt = larg * 9 / 16
+            quadro = QRectF(0, 0, larg, alt)
+            quadro.moveCenter(util.center())
+            p.setPen(QColor("#2c2c36"))
+            p.drawRect(quadro)
+            p.setPen(QColor("#6a6a76"))
+            p.drawText(area.adjusted(0, 0, 0, -6), Qt.AlignHCenter | Qt.AlignBottom,
+                       self.legenda)
+
+            cx, cy = self.valor("Center", (0.5, 0.5))
+            tamanho = self.valor("Size", 1.0)
+            angulo = self.valor("Angle", 0.0)
+            opacidade = max(0.0, min(1.0, self.valor("Gain", 1.0)))
+
+            p.setClipRect(quadro)
+            p.translate(quadro.left() + cx * larg, quadro.top() + (1 - cy) * alt)
+            p.rotate(-angulo)
+            p.scale(tamanho, tamanho)
+            p.setOpacity(opacidade)
+
+            foto = QRectF(-larg * 0.3, -alt * 0.3, larg * 0.6, alt * 0.6)
+            ceu = QLinearGradient(foto.topLeft(), foto.bottomLeft())
+            ceu.setColorAt(0, QColor("#ff9a3d"))
+            ceu.setColorAt(1, QColor("#ff4f6d"))
+            moldura = QPainterPath()
+            moldura.addRoundedRect(foto, 6, 6)
+            p.fillPath(moldura, ceu)
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor(255, 240, 200))
+            p.drawEllipse(QPointF(foto.right() - foto.width() * 0.25,
+                                  foto.top() + foto.height() * 0.3), foto.height() * 0.12,
+                          foto.height() * 0.12)
+            montanha = QPainterPath()
+            montanha.moveTo(foto.left(), foto.bottom())
+            montanha.lineTo(foto.left() + foto.width() * 0.35, foto.top() + foto.height() * 0.45)
+            montanha.lineTo(foto.left() + foto.width() * 0.6, foto.top() + foto.height() * 0.75)
+            montanha.lineTo(foto.left() + foto.width() * 0.75, foto.top() + foto.height() * 0.6)
+            montanha.lineTo(foto.right(), foto.bottom())
+            montanha.closeSubpath()
+            p.setClipPath(moldura, Qt.IntersectClip)
+            p.fillPath(montanha, QColor(60, 20, 50, 200))
+
+    def painel():
+        quadro = QFrame()
+        quadro.setObjectName("painel")
+        layout = QVBoxLayout(quadro)
+        layout.setContentsMargins(16, 14, 16, 16)
+        layout.setSpacing(10)
+        return quadro, layout
+
+    def secao(texto):
+        rotulo = QLabel(texto.upper())
+        rotulo.setObjectName("secao")
+        return rotulo
 
     class JanelaAnimador(QWidget):
         def __init__(self):
             super().__init__()
             self.resolve = None
+            self.setObjectName("raiz")
             self.setWindowTitle("Animador para DaVinci Resolve")
-            self.resize(560, 600)
+            self.resize(1000, 720)
+            self.setMinimumSize(860, 640)
             self.setStyleSheet(ESTILO)
 
-            conectar = QPushButton("Conectar / Atualizar")
+            raiz = QVBoxLayout(self)
+            raiz.setContentsMargins(20, 18, 20, 18)
+            raiz.setSpacing(14)
+
+            # Cabeçalho
+            cabecalho = QHBoxLayout()
+            textos = QVBoxLayout()
+            textos.setSpacing(0)
+            titulo = QLabel("Animador")
+            titulo.setObjectName("titulo")
+            subtitulo = QLabel("Animações prontas para suas imagens no DaVinci Resolve")
+            subtitulo.setObjectName("subtitulo")
+            textos.addWidget(titulo)
+            textos.addWidget(subtitulo)
+            cabecalho.addLayout(textos)
+            cabecalho.addStretch()
+            self.pilula = QLabel()
+            self.pilula.setObjectName("pilula")
+            cabecalho.addWidget(self.pilula, 0, Qt.AlignVCenter)
+            conectar = QPushButton("⟳  Conectar")
             conectar.clicked.connect(self.atualizar)
+            cabecalho.addWidget(conectar, 0, Qt.AlignVCenter)
+            raiz.addLayout(cabecalho)
+
+            colunas = QHBoxLayout()
+            colunas.setSpacing(14)
+            raiz.addLayout(colunas, 1)
+
+            # Coluna esquerda: clipes
+            esquerda, layout_esq = painel()
+            linha = QHBoxLayout()
+            linha.addWidget(secao("Clipes da timeline"))
+            linha.addStretch()
             todos = QPushButton("Selecionar todos")
             todos.clicked.connect(lambda: self.lista.selectAll())
-            topo = QHBoxLayout()
-            topo.addWidget(conectar)
-            topo.addWidget(todos)
-            topo.addStretch()
-
+            linha.addWidget(todos)
+            layout_esq.addLayout(linha)
             self.lista = QListWidget()
             self.lista.setSelectionMode(QAbstractItemView.ExtendedSelection)
             self.lista.itemSelectionChanged.connect(self.atualizar_botao)
+            layout_esq.addWidget(self.lista, 1)
+            self.vazio = QLabel("Abra o DaVinci Resolve Studio com uma timeline\n"
+                                "e clique em Conectar.")
+            self.vazio.setObjectName("dica")
+            self.vazio.setAlignment(Qt.AlignCenter)
+            layout_esq.addWidget(self.vazio, 1)
+            dica = QLabel("Dica: Ctrl ou Shift para escolher vários clipes.")
+            dica.setObjectName("dica")
+            layout_esq.addWidget(dica)
+            colunas.addWidget(esquerda, 5)
 
-            self.preset = QComboBox()
-            self.preset.addItems(list(Animador.PRESETS))
+            # Coluna direita: animação
+            direita, layout_dir = painel()
+            layout_dir.addWidget(secao("Animação"))
+            grade = QGridLayout()
+            grade.setSpacing(8)
+            self.cartoes = QButtonGroup(self)
+            self.cartoes.setExclusive(True)
+            for i, nome in enumerate(Animador.PRESETS):
+                icone, curto, descricao = info_preset(nome)
+                cartao = QToolButton()
+                cartao.setObjectName("cartao")
+                cartao.setText("%s\n%s" % (icone, curto))
+                cartao.setToolTip("%s: %s" % (nome, descricao))
+                cartao.setCheckable(True)
+                cartao.setMinimumSize(96, 62)
+                cartao.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+                cartao.setProperty("preset", nome)
+                self.cartoes.addButton(cartao, i)
+                grade.addWidget(cartao, i // 5, i % 5)
+            self.cartoes.button(0).setChecked(True)
+            self.cartoes.idClicked.connect(lambda _: self.atualizar_previa())
+            layout_dir.addLayout(grade)
+
+            self.previa = Previa()
+            layout_dir.addWidget(self.previa, 1)
+
+            layout_dir.addWidget(secao("Duração"))
+            linha_dur = QHBoxLayout()
+            self.slider = QSlider(Qt.Horizontal)
+            self.slider.setRange(1, 240)
             self.duracao = QSpinBox()
             self.duracao.setRange(1, 1000)
-            self.duracao.setValue(24)
             self.duracao.setSuffix(" frames")
-            self.posicoes = QButtonGroup(self)
+            self.duracao.setButtonSymbols(QSpinBox.NoButtons)
+            self.slider.valueChanged.connect(self.duracao.setValue)
+            self.duracao.valueChanged.connect(
+                lambda v: self.slider.setValue(min(v, self.slider.maximum())))
+            self.duracao.valueChanged.connect(lambda _: self.atualizar_previa())
+            self.duracao.setValue(24)
+            linha_dur.addWidget(self.slider, 1)
+            linha_dur.addWidget(self.duracao)
+            layout_dir.addLayout(linha_dur)
+
+            layout_dir.addWidget(secao("Posição no clipe"))
             linha_pos = QHBoxLayout()
+            linha_pos.setSpacing(8)
+            self.posicoes = QButtonGroup(self)
             for i, texto in enumerate(POSICOES):
-                botao = QRadioButton(texto)
+                botao = QPushButton(texto)
+                botao.setObjectName("segmento")
+                botao.setCheckable(True)
                 botao.setChecked(i == 0)
                 self.posicoes.addButton(botao, i)
                 linha_pos.addWidget(botao)
-            linha_pos.addStretch()
+            layout_dir.addLayout(linha_pos)
+            colunas.addWidget(direita, 6)
 
-            formulario = QFormLayout()
-            formulario.addRow("Preset:", self.preset)
-            formulario.addRow("Duração:", self.duracao)
-            formulario.addRow("Posição:", linha_pos)
-            grupo = QGroupBox("Animação")
-            grupo.setLayout(formulario)
-
-            self.aplicar_btn = QPushButton("Aplicar nos clipes selecionados")
+            # Rodapé
+            self.aplicar_btn = QPushButton()
             self.aplicar_btn.setObjectName("aplicar")
+            self.aplicar_btn.setCursor(Qt.PointingHandCursor)
             self.aplicar_btn.clicked.connect(self.aplicar)
-
-            self.status = QLabel("Abra o DaVinci e clique em Conectar.")
+            raiz.addWidget(self.aplicar_btn)
+            self.status = QLabel()
             self.status.setObjectName("status")
             self.status.setWordWrap(True)
+            raiz.addWidget(self.status)
 
-            layout = QVBoxLayout(self)
-            layout.addLayout(topo)
-            layout.addWidget(QLabel("Clipes da timeline (Ctrl/Shift para escolher vários):"))
-            layout.addWidget(self.lista, 1)
-            layout.addWidget(grupo)
-            layout.addWidget(self.aplicar_btn)
-            layout.addWidget(self.status)
+            self.definir_conexao(None)
+            self.mostrar_lista(False)
+            self.atualizar_previa()
             self.atualizar_botao()
+            self.mostrar("Pronto. Conecte ao DaVinci para listar os clipes.")
 
-        def mostrar_clipes(self, clipes):
+        # -- helpers de estado ------------------------------------------------
+
+        def preset_atual(self):
+            return self.cartoes.checkedButton().property("preset")
+
+        def mostrar(self, texto, tipo="info"):
+            fundo, cor = CORES_STATUS[tipo]
+            self.status.setStyleSheet("background: %s; color: %s; border-radius: 8px;"
+                                      " padding: 9px 12px;" % (fundo, cor))
+            self.status.setText(texto)
+
+        def definir_conexao(self, nome):
+            if nome:
+                texto, fundo, cor = "●  " + nome, "#16301f", "#5ee08a"
+            else:
+                texto, fundo, cor = "●  Desconectado", "#2a2a33", "#8a8a96"
+            self.pilula.setText(texto)
+            self.pilula.setStyleSheet("background: %s; color: %s; border-radius: 11px;"
+                                      " padding: 4px 12px;" % (fundo, cor))
+
+        def mostrar_lista(self, tem_clipes):
+            self.lista.setVisible(tem_clipes)
+            self.vazio.setVisible(not tem_clipes)
+
+        def atualizar_previa(self):
+            self.previa.definir(self.preset_atual(), self.duracao.value())
+
+        def atualizar_botao(self):
+            n = len(self.lista.selectedItems())
+            self.aplicar_btn.setEnabled(n > 0)
+            self.aplicar_btn.setText("✦  Aplicar em %d clipe(s)" % n if n
+                                     else "Selecione clipes para aplicar")
+
+        # -- ações ------------------------------------------------------------
+
+        def mostrar_clipes(self, clipes, nome=None):
             self.lista.clear()
             for trilha, item in clipes:
-                linha = QListWidgetItem("V%d   %s   (%d frames)" % (
-                    trilha, item.GetName(), int(item.GetDuration())))
+                segundos = int(item.GetDuration()) / 24.0
+                linha = QListWidgetItem("V%d    %s\n        %d frames  ·  ~%.1fs" % (
+                    trilha, item.GetName(), int(item.GetDuration()), segundos))
                 linha.setData(Qt.UserRole, item)
                 self.lista.addItem(linha)
-            self.status.setText("%d clipe(s) encontrados." % len(clipes))
+            self.mostrar_lista(bool(clipes))
+            if nome:
+                self.definir_conexao(nome)
+            self.mostrar("%d clipe(s) encontrados." % len(clipes), "ok" if clipes else "info")
 
         def atualizar(self):
             try:
                 if self.resolve is None:
                     self.resolve = conectar_resolve()
-                clipes = listar_clipes(timeline_atual(self.resolve))
+                timeline = timeline_atual(self.resolve)
+                clipes = listar_clipes(timeline)
             except Exception as erro:  # mostra qualquer falha da API na janela
                 self.resolve = None
-                self.status.setText("Erro: %s" % erro)
+                self.definir_conexao(None)
+                self.mostrar("Erro: %s" % erro, "erro")
                 return
-            self.mostrar_clipes(clipes)
-
-        def atualizar_botao(self):
-            n = len(self.lista.selectedItems())
-            self.aplicar_btn.setEnabled(n > 0)
-            self.aplicar_btn.setText("Aplicar em %d clipe(s)" % n if n
-                                     else "Selecione clipes para aplicar")
+            self.mostrar_clipes(clipes, timeline.GetName())
 
         def aplicar(self):
-            preset = self.preset.currentText()
+            preset = self.preset_atual()
             posicao = POSICOES[self.posicoes.checkedId()]
             selecionados = self.lista.selectedItems()
             erros = []
@@ -249,10 +518,12 @@ def criar_janela():
                     aplicar_em_clipe(item, preset, self.duracao.value(), posicao)
                 except Exception as erro:
                     erros.append("%s: %s" % (item.GetName(), erro))
-            texto = "'%s' aplicado em %d clipe(s)." % (preset, len(selecionados) - len(erros))
+            ok = len(selecionados) - len(erros)
             if erros:
-                texto += " Falhas: " + "; ".join(erros)
-            self.status.setText(texto)
+                self.mostrar("'%s' aplicado em %d clipe(s). Falhas: %s"
+                             % (preset, ok, "; ".join(erros)), "erro")
+            else:
+                self.mostrar("✓  '%s' aplicado em %d clipe(s)." % (preset, ok), "ok")
 
     return JanelaAnimador()
 
