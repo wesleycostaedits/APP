@@ -89,6 +89,37 @@ class TestAnimadorApp(unittest.TestCase):
         clipes = app.listar_clipes(FakeTimeline([[a, b], [], [c]]))
         self.assertEqual([t for t, _ in clipes], [1, 1, 3])
 
+    def test_entrada_e_saida_no_mesmo_clipe(self):
+        item = FakeItem(comps=1, duracao=100)
+        app.aplicar_em_clipe(item, "Zoom Pop", 20, app.POSICOES[0], saida="Fade Out")
+        comp = item.comps[0]
+        tipos = sorted(t.kind for t in comp.tools)
+        self.assertEqual(tipos, ["BrightnessContrast", "MediaIn1", "Transform"])
+        fade = [t for t in comp.tools if t.kind == "BrightnessContrast"][0]
+        self.assertEqual((min(fade.values["Gain"]), max(fade.values["Gain"])), (79, 99))
+
+    def test_curva_e_intensidade_chegam_ao_motor(self):
+        item = FakeItem(comps=1)
+        app.aplicar_em_clipe(item, "Ken Burns", 10, app.POSICOES[0], "Linear", 2.0)
+        size = item.comps[0].tools[1].values["Size"]
+        self.assertAlmostEqual(size[10], 1.4)
+        self.assertAlmostEqual(size[5], 1.2)
+
+    def test_remover_do_clipe(self):
+        item = FakeItem(comps=1)
+        app.aplicar_em_clipe(item, "Desfoque de entrada", 10, app.POSICOES[0])
+        self.assertEqual(app.remover_do_clipe(item), 2)
+        self.assertEqual([t.Name for t in item.comps[0].tools], ["MediaIn1"])
+
+
+class TestAtualizacao(unittest.TestCase):
+    def test_compara_versoes(self):
+        self.assertGreater(app.versao_tupla("v2.10.0"), app.versao_tupla("2.9.1"))
+        self.assertEqual(app.versao_tupla("V2.0"), (2, 0))
+
+    def test_falha_de_rede_e_ignorada(self):
+        self.assertIsNone(app.buscar_atualizacao(repositorio="nao/existe", timeout=0.01))
+
 
 if __name__ == "__main__":
     unittest.main()
