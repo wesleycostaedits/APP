@@ -32,8 +32,12 @@ Existem duas formas de usar:
    instalação, marque **"Add python.exe to PATH"**.
 2. No DaVinci Resolve Studio, abra **Preferences → System → General** e mude
    **External scripting using** para **Local**. Reinicie o DaVinci.
-3. Baixe a pasta do projeto (no GitHub: **Code → Download ZIP**) e extraia.
-   Os arquivos `AnimadorApp.py` e `Animador.py` precisam ficar na mesma pasta.
+3. O app usa a biblioteca **PySide6** (Qt) para a interface. O
+   `Abrir Animador.bat` instala ela sozinho na primeira vez. Para instalar
+   manualmente: `pip install -r requirements.txt`.
+4. Baixe a pasta do projeto (no GitHub: **Code → Download ZIP**) e extraia.
+   Os arquivos `AnimadorApp.py`, `Animador.py`, `requirements.txt` e
+   `Abrir Animador.bat` precisam ficar na mesma pasta.
 
 ### Usar
 

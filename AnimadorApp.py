@@ -7,7 +7,8 @@ clipes selecionados (cada clipe ganha uma composição Fusion com a animação).
 Requisitos:
 - DaVinci Resolve Studio aberto, com um projeto e uma timeline.
 - Em Preferences > System > General, "External scripting using" = Local.
-- Python 3 (64 bits) instalado. Rode: python AnimadorApp.py
+- Python 3 (64 bits) e PySide6 (pip install -r requirements.txt).
+  Rode: python AnimadorApp.py
 """
 
 import os
@@ -120,122 +121,152 @@ def aplicar_em_clipe(item, preset, duracao, posicao):
 
 
 # ---------------------------------------------------------------------------
-# Interface
+# Interface (PySide6 / Qt)
 # ---------------------------------------------------------------------------
 
+ESTILO = """
+QWidget { background: #1f1f23; color: #e6e6e6; font-size: 13px; }
+QGroupBox { border: 1px solid #3a3a40; border-radius: 6px; margin-top: 14px; padding: 10px; }
+QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; color: #a0a0a8; }
+QListWidget, QComboBox, QSpinBox {
+    background: #2a2a30; border: 1px solid #3a3a40; border-radius: 4px; padding: 4px;
+}
+QListWidget::item { padding: 5px; }
+QListWidget::item:selected { background: #e8613c; color: white; }
+QPushButton {
+    background: #34343b; border: 1px solid #45454d; border-radius: 4px; padding: 7px 12px;
+}
+QPushButton:hover { background: #3f3f47; }
+QPushButton#aplicar { background: #e8613c; border: none; color: white; font-weight: bold; padding: 10px; }
+QPushButton#aplicar:hover { background: #f07250; }
+QPushButton#aplicar:disabled { background: #5a3a30; color: #b0a0a0; }
+QLabel#status { color: #a0a0a8; }
+"""
 
-class AnimadorApp:
-    def __init__(self, raiz):
-        import tkinter as tk
-        from tkinter import ttk
 
-        self.tk = tk
-        self.raiz = raiz
-        self.resolve = None
-        self.clipes = []
+def criar_janela():
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import (
+        QAbstractItemView, QButtonGroup, QComboBox, QFormLayout, QGroupBox,
+        QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QPushButton,
+        QRadioButton, QSpinBox, QVBoxLayout, QWidget,
+    )
 
-        raiz.title("Animador para DaVinci Resolve")
-        raiz.geometry("520x520")
-        raiz.minsize(420, 420)
-
-        quadro = ttk.Frame(raiz, padding=12)
-        quadro.pack(fill="both", expand=True)
-
-        topo = ttk.Frame(quadro)
-        topo.pack(fill="x")
-        ttk.Button(topo, text="Conectar / Atualizar", command=self.atualizar).pack(side="left")
-        ttk.Button(topo, text="Selecionar todos", command=self.selecionar_todos).pack(side="left", padx=6)
-
-        ttk.Label(quadro, text="Clipes da timeline (Ctrl/Shift para escolher vários):").pack(
-            anchor="w", pady=(12, 4))
-        lista_quadro = ttk.Frame(quadro)
-        lista_quadro.pack(fill="both", expand=True)
-        self.lista = tk.Listbox(lista_quadro, selectmode="extended", activestyle="none")
-        barra = ttk.Scrollbar(lista_quadro, orient="vertical", command=self.lista.yview)
-        self.lista.configure(yscrollcommand=barra.set)
-        self.lista.pack(side="left", fill="both", expand=True)
-        barra.pack(side="right", fill="y")
-
-        opcoes = ttk.LabelFrame(quadro, text="Animação", padding=10)
-        opcoes.pack(fill="x", pady=12)
-        opcoes.columnconfigure(1, weight=1)
-
-        ttk.Label(opcoes, text="Preset:").grid(row=0, column=0, sticky="w")
-        self.preset = ttk.Combobox(opcoes, values=list(Animador.PRESETS), state="readonly")
-        self.preset.current(0)
-        self.preset.grid(row=0, column=1, sticky="ew", pady=2)
-
-        ttk.Label(opcoes, text="Duração (frames):").grid(row=1, column=0, sticky="w")
-        self.duracao = tk.IntVar(value=24)
-        ttk.Spinbox(opcoes, from_=1, to=1000, textvariable=self.duracao, width=8).grid(
-            row=1, column=1, sticky="w", pady=2)
-
-        ttk.Label(opcoes, text="Posição:").grid(row=2, column=0, sticky="w")
-        self.posicao = tk.StringVar(value=POSICOES[0])
-        pos_quadro = ttk.Frame(opcoes)
-        pos_quadro.grid(row=2, column=1, sticky="w")
-        for texto in POSICOES:
-            ttk.Radiobutton(pos_quadro, text=texto, value=texto,
-                            variable=self.posicao).pack(side="left", padx=(0, 10))
-
-        ttk.Button(quadro, text="Aplicar nos clipes selecionados",
-                   command=self.aplicar).pack(fill="x")
-        self.status = ttk.Label(quadro, text="Clique em Conectar com o DaVinci aberto.",
-                                wraplength=480)
-        self.status.pack(anchor="w", pady=(8, 0))
-
-    def mostrar(self, texto):
-        self.status.configure(text=texto)
-
-    def atualizar(self):
-        try:
-            if self.resolve is None:
-                self.resolve = conectar_resolve()
-            self.clipes = listar_clipes(timeline_atual(self.resolve))
-        except Exception as erro:  # mostra qualquer falha da API na janela
+    class JanelaAnimador(QWidget):
+        def __init__(self):
+            super().__init__()
             self.resolve = None
-            self.mostrar("Erro: %s" % erro)
-            return
-        self.lista.delete(0, "end")
-        for trilha, item in self.clipes:
-            self.lista.insert("end", "V%d  |  %s  (%d frames)" % (
-                trilha, item.GetName(), int(item.GetDuration())))
-        self.mostrar("%d clipe(s) encontrados." % len(self.clipes))
+            self.setWindowTitle("Animador para DaVinci Resolve")
+            self.resize(560, 600)
+            self.setStyleSheet(ESTILO)
 
-    def selecionar_todos(self):
-        self.lista.selection_set(0, "end")
+            conectar = QPushButton("Conectar / Atualizar")
+            conectar.clicked.connect(self.atualizar)
+            todos = QPushButton("Selecionar todos")
+            todos.clicked.connect(lambda: self.lista.selectAll())
+            topo = QHBoxLayout()
+            topo.addWidget(conectar)
+            topo.addWidget(todos)
+            topo.addStretch()
 
-    def aplicar(self):
-        indices = self.lista.curselection()
-        if not indices:
-            self.mostrar("Selecione pelo menos um clipe.")
-            return
-        try:
-            duracao = int(self.duracao.get())
-        except (ValueError, self.tk.TclError):
-            self.mostrar("Duração inválida.")
-            return
-        preset = self.preset.get()
-        erros = []
-        for i in indices:
-            item = self.clipes[i][1]
+            self.lista = QListWidget()
+            self.lista.setSelectionMode(QAbstractItemView.ExtendedSelection)
+            self.lista.itemSelectionChanged.connect(self.atualizar_botao)
+
+            self.preset = QComboBox()
+            self.preset.addItems(list(Animador.PRESETS))
+            self.duracao = QSpinBox()
+            self.duracao.setRange(1, 1000)
+            self.duracao.setValue(24)
+            self.duracao.setSuffix(" frames")
+            self.posicoes = QButtonGroup(self)
+            linha_pos = QHBoxLayout()
+            for i, texto in enumerate(POSICOES):
+                botao = QRadioButton(texto)
+                botao.setChecked(i == 0)
+                self.posicoes.addButton(botao, i)
+                linha_pos.addWidget(botao)
+            linha_pos.addStretch()
+
+            formulario = QFormLayout()
+            formulario.addRow("Preset:", self.preset)
+            formulario.addRow("Duração:", self.duracao)
+            formulario.addRow("Posição:", linha_pos)
+            grupo = QGroupBox("Animação")
+            grupo.setLayout(formulario)
+
+            self.aplicar_btn = QPushButton("Aplicar nos clipes selecionados")
+            self.aplicar_btn.setObjectName("aplicar")
+            self.aplicar_btn.clicked.connect(self.aplicar)
+
+            self.status = QLabel("Abra o DaVinci e clique em Conectar.")
+            self.status.setObjectName("status")
+            self.status.setWordWrap(True)
+
+            layout = QVBoxLayout(self)
+            layout.addLayout(topo)
+            layout.addWidget(QLabel("Clipes da timeline (Ctrl/Shift para escolher vários):"))
+            layout.addWidget(self.lista, 1)
+            layout.addWidget(grupo)
+            layout.addWidget(self.aplicar_btn)
+            layout.addWidget(self.status)
+            self.atualizar_botao()
+
+        def mostrar_clipes(self, clipes):
+            self.lista.clear()
+            for trilha, item in clipes:
+                linha = QListWidgetItem("V%d   %s   (%d frames)" % (
+                    trilha, item.GetName(), int(item.GetDuration())))
+                linha.setData(Qt.UserRole, item)
+                self.lista.addItem(linha)
+            self.status.setText("%d clipe(s) encontrados." % len(clipes))
+
+        def atualizar(self):
             try:
-                aplicar_em_clipe(item, preset, duracao, self.posicao.get())
-            except Exception as erro:
-                erros.append("%s: %s" % (item.GetName(), erro))
-        ok = len(indices) - len(erros)
-        texto = "'%s' aplicado em %d clipe(s)." % (preset, ok)
-        if erros:
-            texto += " Falhas: " + "; ".join(erros)
-        self.mostrar(texto)
+                if self.resolve is None:
+                    self.resolve = conectar_resolve()
+                clipes = listar_clipes(timeline_atual(self.resolve))
+            except Exception as erro:  # mostra qualquer falha da API na janela
+                self.resolve = None
+                self.status.setText("Erro: %s" % erro)
+                return
+            self.mostrar_clipes(clipes)
+
+        def atualizar_botao(self):
+            n = len(self.lista.selectedItems())
+            self.aplicar_btn.setEnabled(n > 0)
+            self.aplicar_btn.setText("Aplicar em %d clipe(s)" % n if n
+                                     else "Selecione clipes para aplicar")
+
+        def aplicar(self):
+            preset = self.preset.currentText()
+            posicao = POSICOES[self.posicoes.checkedId()]
+            selecionados = self.lista.selectedItems()
+            erros = []
+            for linha in selecionados:
+                item = linha.data(Qt.UserRole)
+                try:
+                    aplicar_em_clipe(item, preset, self.duracao.value(), posicao)
+                except Exception as erro:
+                    erros.append("%s: %s" % (item.GetName(), erro))
+            texto = "'%s' aplicado em %d clipe(s)." % (preset, len(selecionados) - len(erros))
+            if erros:
+                texto += " Falhas: " + "; ".join(erros)
+            self.status.setText(texto)
+
+    return JanelaAnimador()
 
 
 def main():
-    import tkinter as tk
-
-    raiz = tk.Tk()
-    AnimadorApp(raiz)
-    raiz.mainloop()
+    try:
+        from PySide6.QtWidgets import QApplication
+    except ImportError:
+        print("PySide6 não está instalado. Rode: pip install -r requirements.txt")
+        sys.exit(1)
+    app = QApplication(sys.argv)
+    janela = criar_janela()
+    janela.show()
+    sys.exit(app.exec())
 
 
 if __name__ == "__main__":
