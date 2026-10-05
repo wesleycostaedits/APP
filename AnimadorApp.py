@@ -47,18 +47,38 @@ def _caminhos_padrao():
     return modulos, lib
 
 
+def _carregar_fusionscript(lib):
+    """Carrega a biblioteca de scripting do DaVinci direto do arquivo."""
+    import importlib.machinery
+    import importlib.util
+
+    carregador = importlib.machinery.ExtensionFileLoader("fusionscript", lib)
+    spec = importlib.util.spec_from_file_location("fusionscript", lib, loader=carregador)
+    modulo = importlib.util.module_from_spec(spec)
+    carregador.exec_module(modulo)
+    return modulo
+
+
 def conectar_resolve():
     """Devolve o objeto `resolve` ou levanta RuntimeError com uma mensagem clara."""
-    modulos, lib = _caminhos_padrao()
-    os.environ.setdefault("RESOLVE_SCRIPT_LIB", lib)
-    if modulos not in sys.path:
-        sys.path.append(modulos)
-    try:
-        import DaVinciResolveScript as dvr
-    except ImportError:
-        raise RuntimeError("Não encontrei a API do DaVinci Resolve. "
-                           "O DaVinci Resolve está instalado?")
-    resolve = dvr.scriptapp("Resolve")
+    modulos, padrao = _caminhos_padrao()
+    lib = os.environ.get("RESOLVE_SCRIPT_LIB", padrao)
+    if os.path.exists(lib):
+        try:
+            api = _carregar_fusionscript(lib)
+        except Exception as erro:
+            raise RuntimeError("Não consegui carregar a API do DaVinci (%s): %s" % (lib, erro))
+    else:
+        # Instalação fora do lugar padrão: tenta o módulo que acompanha o DaVinci.
+        os.environ.setdefault("RESOLVE_SCRIPT_LIB", lib)
+        if modulos not in sys.path:
+            sys.path.append(modulos)
+        try:
+            import DaVinciResolveScript as api
+        except ImportError:
+            raise RuntimeError("Não encontrei a API do DaVinci Resolve. "
+                               "O DaVinci Resolve está instalado?")
+    resolve = api.scriptapp("Resolve")
     if resolve is None:
         raise RuntimeError("Não consegui conectar. Verifique se o DaVinci Resolve Studio "
                            "está aberto e se 'External scripting using' está em Local "

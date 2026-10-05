@@ -1,0 +1,55 @@
+name: Gerar Animador.exe
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Instalar dependências
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+
+      - name: Rodar testes
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m unittest discover tests -v
+
+      - name: Gerar Animador.exe
+        run: pyinstaller Animador.spec --noconfirm
+
+      - name: Gerar instalador
+        shell: pwsh
+        run: |
+          $versao = (Select-String -Path AnimadorApp.py -Pattern '^VERSAO = "(.+)"').Matches[0].Groups[1].Value
+          choco install innosetup --no-progress -y
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DVersao=$versao" instalador\Animador.iss
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Animador-Windows
+          path: |
+            dist/Animador.exe
+            dist/Animador-Instalador-*.exe
+
+      - name: Publicar versão (tags v*)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/Animador.exe
+            dist/Animador-Instalador-*.exe
