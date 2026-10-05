@@ -115,6 +115,11 @@ QToolButton#estrela {
     color: #9a9aa2; font-size: 14px;
 }
 QToolButton#estrela:checked { color: #ffb020; }
+QPushButton#aplicarCartao {
+    background: $acento; color: white; border: none; border-radius: 15px;
+    padding: 6px 18px; font-weight: 700;
+}
+QPushButton#aplicarCartao:hover { background: $acento2; }
 QListWidget { background: transparent; border: none; outline: none; }
 QListWidget::item {
     background: $campo; border: 1px solid $borda; border-radius: 8px;
@@ -138,6 +143,7 @@ QSlider::handle:horizontal {
     margin: -6px 0; border-radius: 8px;
 }
 QScrollArea { background: transparent; border: none; }
+QWidget#conteudo { background: transparent; }
 QScrollBar:vertical { background: transparent; width: 8px; margin: 2px; }
 QScrollBar::handle:vertical { background: $borda2; border-radius: 3px; min-height: 30px; }
 QScrollBar::add-line, QScrollBar::sub-line { height: 0; }
@@ -411,6 +417,34 @@ class Cartao(QFrame):
         self.estrela.setToolTip("Favoritar")
         self.estrela.toggled.connect(lambda marcado: janela.favoritar(nome, marcado))
 
+        # Botão que aparece sobre a prévia quando o mouse passa pelo cartão.
+        self.aplicar_btn = QPushButton("▶  Aplicar", self.previa)
+        self.aplicar_btn.setObjectName("aplicarCartao")
+        self.aplicar_btn.setCursor(Qt.PointingHandCursor)
+        self.aplicar_btn.setToolTip("Aplicar nos clipes selecionados")
+        self.aplicar_btn.clicked.connect(self.aplicar)
+        self.aplicar_btn.hide()
+
+    def aplicar(self):
+        self.janela.selecionar(self.nome)
+        self.janela.aplicar()
+
+    def enterEvent(self, evento):
+        self.aplicar_btn.adjustSize()
+        self.posicionar_botoes()
+        self.aplicar_btn.show()
+        self.aplicar_btn.raise_()
+        super().enterEvent(evento)
+
+    def leaveEvent(self, evento):
+        self.aplicar_btn.hide()
+        super().leaveEvent(evento)
+
+    def posicionar_botoes(self):
+        self.estrela.move(self.previa.width() - 34, 8)
+        b = self.aplicar_btn
+        b.move((self.previa.width() - b.width()) // 2, self.previa.height() - b.height() - 10)
+
     def atualizar(self, duracao, curva, intensidade, acento):
         meu = self.janela.biblioteca.meus.get(self.nome)
         if meu:
@@ -427,7 +461,7 @@ class Cartao(QFrame):
 
     def resizeEvent(self, evento):
         super().resizeEvent(evento)
-        self.estrela.move(self.previa.width() - 34, 8)
+        self.posicionar_botoes()
         # Nomes longos terminam em "…" em vez de serem cortados.
         largura = max(40, self.width() - 26)
         self.titulo.setText(self.titulo.fontMetrics().elidedText(
@@ -762,7 +796,7 @@ class JanelaAnimador(QWidget):
         self.resultado.setAlignment(Qt.AlignRight)
         v.addWidget(self.resultado)
         self.conteudo = QWidget()
-        self.conteudo.setStyleSheet("background: transparent;")
+        self.conteudo.setObjectName("conteudo")
         self.grade = QGridLayout(self.conteudo)
         self.grade.setContentsMargins(0, 0, 6, 16)
         self.grade.setSpacing(14)
@@ -1206,7 +1240,12 @@ class JanelaAnimador(QWidget):
             self.mostrar("✓  '%s'%s aplicado em %d clipe(s)." % (nome, extra, ok), "ok")
 
     def aplicar(self):
-        self.aplicar_em(self.lista.selectedItems(), self.selecionado)
+        linhas = self.lista.selectedItems()
+        if not linhas:
+            self.mostrar("Selecione os clipes na lista à direita para aplicar '%s'."
+                         % self.selecionado, "erro")
+            return
+        self.aplicar_em(linhas, self.selecionado)
 
     def soltar_no_clipe(self, linha, nome):
         self.selecionar(nome)
