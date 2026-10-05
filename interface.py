@@ -116,8 +116,8 @@ QToolButton#estrela {
 }
 QToolButton#estrela:checked { color: #ffb020; }
 QPushButton#aplicarCartao {
-    background: $acento; color: white; border: none; border-radius: 15px;
-    padding: 6px 18px; font-weight: 700;
+    background: $acento; color: white; border: none; border-radius: 11px;
+    padding: 3px 12px; font-size: 11px; font-weight: 700;
 }
 QPushButton#aplicarCartao:hover { background: $acento2; }
 QListWidget { background: transparent; border: none; outline: none; }
@@ -443,7 +443,7 @@ class Cartao(QFrame):
     def posicionar_botoes(self):
         self.estrela.move(self.previa.width() - 34, 8)
         b = self.aplicar_btn
-        b.move((self.previa.width() - b.width()) // 2, self.previa.height() - b.height() - 10)
+        b.move((self.previa.width() - b.width()) // 2, (self.previa.height() - b.height()) // 2)
 
     def atualizar(self, duracao, curva, intensidade, acento):
         meu = self.janela.biblioteca.meus.get(self.nome)
