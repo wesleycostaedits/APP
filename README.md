@@ -28,7 +28,8 @@ Existem duas formas de usar:
 
 ![Tela do Animador App](docs/tela.png)
 
-Escolha a animação nos cartões e veja a **prévia ao vivo** antes de aplicar.
+Cada cartão mostra a **prévia ao vivo** da animação. Filtre por categoria,
+busque pelo nome e marque seus favoritos com a ★ (ficam salvos).
 
 ### Preparar (só uma vez)
 
